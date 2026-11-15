@@ -70,8 +70,38 @@ npm run dev
 
 - 每个模块的前端页面在 `frontend/src/views/<模块>/index.vue`，后端接口在
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
-- 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
-- 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+- 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message, code, entry }`，
+  其中 `code` 为机器可读的拒绝原因（如 `PRODUCT_OFFLINE`、`CROSS_UNIT`、`INVALID_STATE`）。
+- 状态流转只允许在 `app/services` 里改，路由层不做业务判断；写操作在模块锁
+  （`app/store.py` 的 `store.lock(module)`）内完成「读状态→校验→落状态」。
+
+### 产品市场分发（market）业务约束
+
+- **全字段登记**：定价方案、试用天数、上线时间、封面描述、商品归属随登记/编辑完整落库回显；
+  商品编号与商品归属为不可变字段。
+- **上架前置校验**：只有「草稿」商品且所属产品处于「已发布」可分发状态才能上架；
+  产品「已下线」时上架返回 `PRODUCT_OFFLINE`，产品重新发布恢复可分发后才可上架。
+- **状态顺序**：草稿 → 已上架 → 已下架 → 已删除，只能逐步推进，跳转动作被
+  `INVALID_STATE` 拒绝；`status` 与「商品状态」字段始终同步，列表页无状态残留。
+- **试用配置快照**：上架成功时固化完整试用配置（定价方案、试用天数、上线时间、
+  所属产品、商品归属等）到 `试用配置快照`，后续下架/删除不覆盖、不丢失。
+- **单位权限**：写操作按「商品归属」做单位级控制，跨单位只读，越权写返回
+  `CROSS_UNIT`；共享试用配置（定价方案、试用天数、上线时间）仅商品登记人可改，
+  同单位其他运营修改返回 `FORBIDDEN`。
+- **并发安全**：同一商品并发下架时，模块锁保证只有第一个请求落一次状态变化，
+  其余请求看到的已是「已下架」而被状态机拒绝。
+- 操作人身份通过请求头 `X-Operator` / `X-Operator-Unit` 传递（中文值百分号编码），
+  也可放在请求体 `values.operator` / `values.operatorUnit`；缺失时回落默认演示身份。
+- 前端页头可切换操作单位，切到非归属渠道组后市场页自动进入只读态。
+
+### 验证脚本（仅依赖标准库，无需 pytest）
+
+```bash
+cd backend
+.venv/bin/python tests/verify_service.py   # 服务级：含 8 线程并发下架验证
+.venv/bin/uvicorn app.main:app --port 8000 # 另开一个终端起服务
+.venv/bin/python tests/verify_http.py      # HTTP 级：对运行中的服务打全链路用例
+```
 
 领域：数据工程
 子方向：数据分析与数据应用

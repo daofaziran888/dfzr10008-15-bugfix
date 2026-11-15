@@ -18,6 +18,8 @@ class PageResult(BaseModel, Generic[T]):
 class ActionResult(BaseModel):
     ok: bool
     message: str
+    # 机器可读的拒绝原因，前端按它区分权限/状态冲突等场景；成功时为空。
+    code: str | None = None
     entry: dict[str, Any] | None = None
 
 
